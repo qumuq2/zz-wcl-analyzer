@@ -1,34 +1,34 @@
 """WCL 日志分析逻辑
 
-基于原项目 app/analyzer.py 改造，同时融合了实际查询中新增的分析功能：
+基于原项目 app/analyzer.py 改造，融入实际查询中的分析功能：
 - 敌人技能分析（原项目保留）
 - 敌人施法CD分析（原项目保留）
 - Boss机制触发类型分析（原项目保留）
 - 玩家承伤分析（原项目保留，新增事件级分析）
-- Boss阶段承伤分析（新增：按Boss时间窗口分析承伤）
-- 小怪阶段承伤分析（新增：Boss之间的过渡阶段分析）
+- Boss阶段承伤分析：按Boss时间窗口分析承伤，含技能伤害类型
+- 小怪阶段承伤分析：按技能维度分析，含攻击间隔、攻击模式判断
 """
 
 from collections import defaultdict
-from .config import DAMAGE_TYPE_MAP, HIT_TYPE_MAP, PIT_OF_SARON_BOSS1_SKILLS
+from .config import DAMAGE_TYPE_MAP, HIT_TYPE_MAP, PIT_OF_SARON_BOSSES, PIT_OF_SARON_BOSS1_SKILLS
 from .utils import (
     detect_boss_phases,
     calculate_damage_taken_stats,
     build_actor_maps,
     filter_events_by_target,
+    filter_events_by_time,
     format_duration,
     format_dps,
     format_number,
+    format_damage_type,
+    analyze_skills,
 )
 
 
 # ===== 原项目分析函数（保留） =====
 
 def analyze_enemy_abilities(table_data, master_data=None):
-    """分析敌人技能：伤害类型、数值、目标分布
-
-    输入：table(DamageDone, Enemies) 的数据
-    """
+    """分析敌人技能：伤害类型、数值、目标分布"""
     entries = table_data.get("entries", [])
     actor_map = {}
     if master_data:
@@ -42,7 +42,7 @@ def analyze_enemy_abilities(table_data, master_data=None):
             ability_info = {
                 "技能名称": ab.get("name", "未知"),
                 "技能ID": ab.get("guid"),
-                "伤害类型": DAMAGE_TYPE_MAP.get(ab.get("type"), f"未知({ab.get('type')})"),
+                "伤害类型": format_damage_type(ab.get("type", 0)),
                 "总伤害": ab.get("total", 0),
                 "减伤后总伤害": ab.get("totalReduced", 0),
                 "图标": ab.get("icon", ""),
@@ -81,10 +81,7 @@ def analyze_enemy_abilities(table_data, master_data=None):
 
 
 def analyze_enemy_casts(events, master_data=None, fight_start=0, fight_end=0):
-    """分析敌人施法事件：技能CD规律、施法时间轴
-
-    输入：events(Casts, Enemies) 的数据
-    """
+    """分析敌人施法事件：技能CD规律、施法时间轴"""
     casts_by_source_ability = defaultdict(list)
     for event in events:
         if event.get("type") != "cast":
@@ -107,7 +104,6 @@ def analyze_enemy_casts(events, master_data=None, fight_start=0, fight_end=0):
         timestamps.sort()
         intervals = [timestamps[i] - timestamps[i-1] for i in range(1, len(timestamps))]
         cd_analysis = _analyze_cd_pattern(intervals)
-
         actor_name = actor_map.get(source_id, {}).get("name", f"ID:{source_id}")
         ability_info = ability_map.get(ability_id, {})
         ability_name = ability_info.get("name", f"技能ID:{ability_id}")
@@ -163,7 +159,6 @@ def analyze_boss_mechanics(cast_events, damage_events, master_data=None,
         timestamps.sort()
         intervals = [timestamps[i] - timestamps[i-1] for i in range(1, len(timestamps))]
         cd_analysis = _analyze_cd_pattern(intervals)
-
         relative_times = []
         for t in timestamps:
             pct = round((t - fight_start) / fight_duration * 100, 1) if fight_duration > 0 else None
@@ -172,9 +167,7 @@ def analyze_boss_mechanics(cast_events, damage_events, master_data=None,
                 "时间(秒)": round((t - fight_start) / 1000, 1),
                 "战斗进度(%)": pct,
             })
-
         trigger_type = _determine_trigger_type(cd_analysis, relative_times)
-
         actor_name = actor_map.get(source_id, {}).get("name", f"ID:{source_id}")
         ability_info = ability_map.get(ability_id, {})
         ability_name = ability_info.get("name", f"技能ID:{ability_id}")
@@ -193,18 +186,13 @@ def analyze_boss_mechanics(cast_events, damage_events, master_data=None,
 
 
 def analyze_player_damage_taken(table_data, player_name=None, ability_name=None):
-    """分析玩家承伤情况
-
-    输入：table(DamageTaken) 的数据
-    """
+    """分析玩家承伤情况"""
     entries = table_data.get("entries", [])
-
     result = []
     for entry in entries:
         name = entry.get("name", "")
         if player_name and player_name.lower() not in name.lower():
             continue
-
         abilities = []
         for ab in entry.get("abilities", []):
             if ability_name and ability_name.lower() not in ab.get("name", "").lower():
@@ -212,7 +200,7 @@ def analyze_player_damage_taken(table_data, player_name=None, ability_name=None)
             ability_info = {
                 "技能名称": ab.get("name", "未知"),
                 "技能ID": ab.get("guid"),
-                "伤害类型": DAMAGE_TYPE_MAP.get(ab.get("type"), f"未知({ab.get('type')})"),
+                "伤害类型": format_damage_type(ab.get("type", 0)),
                 "总承受伤害": ab.get("total", 0),
                 "减伤后总承受伤害": ab.get("totalReduced", 0),
                 "命中次数": ab.get("hitCount", 0),
@@ -220,7 +208,6 @@ def analyze_player_damage_taken(table_data, player_name=None, ability_name=None)
                 "图标": ab.get("icon", ""),
             }
             abilities.append(ability_info)
-
         sources = []
         for s in entry.get("targets", []):
             source_info = {
@@ -230,7 +217,6 @@ def analyze_player_damage_taken(table_data, player_name=None, ability_name=None)
                 "减伤后造成伤害": s.get("totalReduced", 0),
             }
             sources.append(source_info)
-
         player_info = {
             "玩家名称": name,
             "玩家ID": entry.get("id"),
@@ -245,79 +231,61 @@ def analyze_player_damage_taken(table_data, player_name=None, ability_name=None)
     return {"玩家数量": len(result), "分析结果": result}
 
 
-# ===== 新增：事件级承伤分析 =====
+# ===== 新增：Boss阶段承伤分析（含技能伤害类型） =====
 
 def analyze_boss_damage_taken(client, code, fight_id, tank_id, boss_names=None):
-    """分析坦克在Boss战中的承伤详情
-
-    通过Boss名称匹配伤害事件的source，按Boss时间窗口统计承伤。
-
-    Args:
-        client: WCLClient实例
-        code: 报告代码
-        fight_id: 战斗ID
-        tank_id: 坦克actor ID
-        boss_names: Boss名称字典，默认萨隆矿坑
-
-    Returns:
-        每个Boss阶段的承伤统计
-    """
-    # 获取masterData
+    """分析坦克在Boss战中的承伤详情，按技能维度含伤害类型"""
     master_data = client.get_master_data(code)
-    actor_name_map, actor_icon_map, ability_map = build_actor_maps(master_data)
+    actor_name_map, actor_icon_map, ability_map, ability_type_map = build_actor_maps(master_data)
 
-    # 获取所有DamageTaken事件（targetID过滤无效，客户端过滤）
     all_events = client.get_all_events(code, [fight_id], "DamageTaken", max_pages=20)
     tank_events = filter_events_by_target(all_events, tank_id)
 
     if not tank_events:
         return {"error": f"未找到坦克ID {tank_id} 的承伤事件"}
 
-    # 检测Boss阶段
     phases = detect_boss_phases(tank_events, actor_name_map, boss_names)
 
-    # 按Boss阶段统计
     boss_results = {}
     for phase in phases["boss_phases"]:
-        phase_events = filter_events_by_time(
-            tank_events, phase["start"], phase["end"]
-        )
-        # 排除非Boss的伤害（只统计该Boss造成的伤害）
         boss_name = phase["boss"]
+        phase_events = filter_events_by_time(tank_events, phase["start"], phase["end"])
         boss_only_events = [
             e for e in phase_events
             if actor_name_map.get(e.get("sourceID", 0)) == boss_name
         ]
-        stats = calculate_damage_taken_stats(boss_only_events, actor_name_map)
+
+        # 按技能维度分析
+        skills = analyze_skills(boss_only_events, actor_name_map, ability_type_map)
+
         duration_ms = phase["end"] - phase["start"]
+        total_stats = calculate_damage_taken_stats(boss_only_events, actor_name_map)
+
         boss_results[boss_name] = {
-            **stats,
+            **total_stats,
             "duration_ms": duration_ms,
             "duration_str": format_duration(duration_ms),
-            "dps_str": format_dps(stats["total"], duration_ms),
+            "dps_str": format_dps(total_stats["total"], duration_ms),
+            "skills": skills,
         }
 
-    return {
-        "boss_phases": phases["boss_phases"],
-        "boss_damage": boss_results,
-    }
+    return {"boss_phases": phases["boss_phases"], "boss_damage": boss_results}
 
+
+# ===== 新增：小怪阶段承伤分析（按技能维度） =====
 
 def analyze_trash_damage_taken(client, code, fight_id, tank_id, boss_names=None):
-    """分析坦克在小怪阶段（Boss之间）的承伤详情
+    """分析坦克在小怪阶段的承伤，按技能维度含攻击间隔分析
 
-    Args:
-        client: WCLClient实例
-        code: 报告代码
-        fight_id: 战斗ID
-        tank_id: 坦克actor ID
-        boss_names: Boss名称字典
-
-    Returns:
-        每个小怪阶段的承伤统计
+    分析维度：每个敌人技能独立统计
+    - 伤害类型（物理/冰霜/暗影等）
+    - 单次最大伤害（未减免）
+    - 平均每次伤害
+    - 攻击间隔（均值、最短、最长）
+    - 攻击模式判断（快轻/慢重/固定CD技能）
     """
     master_data = client.get_master_data(code)
-    actor_name_map, actor_icon_map, ability_map = build_actor_maps(master_data)
+    actor_name_map, actor_icon_map, ability_map, ability_type_map = build_actor_maps(master_data)
 
     all_events = client.get_all_events(code, [fight_id], "DamageTaken", max_pages=20)
     tank_events = filter_events_by_target(all_events, tank_id)
@@ -329,73 +297,54 @@ def analyze_trash_damage_taken(client, code, fight_id, tank_id, boss_names=None)
 
     trash_results = {}
     for phase in phases["trash_phases"]:
-        phase_events = filter_events_by_time(
-            tank_events, phase["start"], phase["end"]
-        )
-        # 排除Boss造成的伤害
-        boss_names_set = set(boss_names.keys()) if boss_names else set()
+        boss_names_set = set((boss_names or {}).keys())
+        phase_events = filter_events_by_time(tank_events, phase["start"], phase["end"])
         trash_only_events = [
             e for e in phase_events
             if actor_name_map.get(e.get("sourceID", 0)) not in boss_names_set
         ]
-        stats = calculate_damage_taken_stats(trash_only_events, actor_name_map)
+
+        # 按技能维度分析
+        skills = analyze_skills(trash_only_events, actor_name_map, ability_type_map)
+
         duration_ms = phase["end"] - phase["start"]
         after_boss = phase["after_boss"]
+        total_stats = calculate_damage_taken_stats(trash_only_events, actor_name_map)
+
         trash_results[f"Boss{after_boss}后小怪"] = {
-            **stats,
+            **total_stats,
             "duration_ms": duration_ms,
             "duration_str": format_duration(duration_ms),
-            "dps_str": format_dps(stats["total"], duration_ms),
+            "dps_str": format_dps(total_stats["total"], duration_ms),
+            "skills": skills,
         }
 
-    return {
-        "trash_phases": phases["trash_phases"],
-        "trash_damage": trash_results,
-    }
+    return {"trash_phases": phases["trash_phases"], "trash_damage": trash_results}
 
+
+# ===== 完整坦克承伤分析 =====
 
 def analyze_full_tank_run(client, code, fight_id, tank_id, tank_name,
                           boss_names=None, skill_map=None):
-    """完整分析一次大秘境中坦克的承伤
-
-    一次性获取所有数据并完成分析，包括：
-    - 基本信息（层数、时长、通关状态）
-    - Boss阶段承伤
-    - 小怪阶段承伤
-    - 全局承伤时间线
-
-    Args:
-        client: WCLClient实例
-        code: 报告代码
-        fight_id: 战斗ID
-        tank_id: 坦克actor ID
-        tank_name: 坦克名称
-        boss_names: Boss名称映射
-        skill_map: 技能ID映射
-    """
-    # 获取基本信息
+    """完整分析一次大秘境中坦克的承伤"""
     fights = client.get_fights(code)
     fight = next((f for f in fights if f["id"] == fight_id), None)
     if not fight:
         return {"error": f"未找到战斗ID {fight_id}"}
 
     master_data = client.get_master_data(code)
-    actor_name_map, actor_icon_map, ability_map = build_actor_maps(master_data)
+    actor_name_map, actor_icon_map, ability_map, ability_type_map = build_actor_maps(master_data)
 
-    # 获取所有承伤事件
     all_events = client.get_all_events(code, [fight_id], "DamageTaken", max_pages=20)
     tank_events = filter_events_by_target(all_events, tank_id)
 
     if not tank_events:
         return {"error": f"未找到坦克 {tank_name} 的承伤事件"}
 
-    # 检测Boss阶段
     phases = detect_boss_phases(tank_events, actor_name_map, boss_names)
-
-    # 总承伤统计
     total_stats = calculate_damage_taken_stats(tank_events, actor_name_map)
 
-    # Boss阶段统计
+    # Boss阶段统计（技能维度+伤害类型）
     boss_results = {}
     for phase in phases["boss_phases"]:
         boss_name = phase["boss"]
@@ -404,27 +353,20 @@ def analyze_full_tank_run(client, code, fight_id, tank_id, tank_name,
             if phase["start"] <= e.get("timestamp", 0) <= phase["end"]
             and actor_name_map.get(e.get("sourceID", 0)) == boss_name
         ]
-        stats = calculate_damage_taken_stats(boss_events, actor_name_map)
-        duration_ms = phase["end"] - phase["start"]
 
-        # 技能分布（如果有技能映射，用映射名称）
-        by_ability_detail = {}
-        for aid, dmg in stats["by_ability"].items():
-            skill_name = (skill_map or {}).get(aid, ability_map.get(aid, {}).get("name", f"技能{aid}"))
-            by_ability_detail[skill_name] = {
-                "damage": dmg,
-                "pct": dmg / max(stats["total"], 1) * 100,
-            }
+        skills = analyze_skills(boss_events, actor_name_map, ability_type_map)
+        duration_ms = phase["end"] - phase["start"]
+        stats = calculate_damage_taken_stats(boss_events, actor_name_map)
 
         boss_results[boss_name] = {
             **stats,
-            "by_ability_detail": by_ability_detail,
             "duration_ms": duration_ms,
             "duration_str": format_duration(duration_ms),
             "dps_str": format_dps(stats["total"], duration_ms),
+            "skills": skills,
         }
 
-    # 小怪阶段统计
+    # 小怪阶段统计（技能维度+攻击间隔分析）
     trash_results = {}
     for phase in phases["trash_phases"]:
         boss_names_set = set((boss_names or {}).keys())
@@ -433,24 +375,18 @@ def analyze_full_tank_run(client, code, fight_id, tank_id, tank_name,
             if phase["start"] <= e.get("timestamp", 0) <= phase["end"]
             and actor_name_map.get(e.get("sourceID", 0)) not in boss_names_set
         ]
-        stats = calculate_damage_taken_stats(trash_events, actor_name_map)
+
+        skills = analyze_skills(trash_events, actor_name_map, ability_type_map)
         duration_ms = phase["end"] - phase["start"]
         after_boss = phase["after_boss"]
-
-        # 按怪物来源分布
-        by_source_detail = {}
-        for src, dmg in sorted(stats["by_source"].items(), key=lambda x: -x[1]):
-            by_source_detail[src] = {
-                "damage": dmg,
-                "pct": dmg / max(stats["total"], 1) * 100,
-            }
+        stats = calculate_damage_taken_stats(trash_events, actor_name_map)
 
         trash_results[f"Boss{after_boss}后小怪"] = {
             **stats,
-            "by_source_detail": by_source_detail,
             "duration_ms": duration_ms,
             "duration_str": format_duration(duration_ms),
             "dps_str": format_dps(stats["total"], duration_ms),
+            "skills": skills,
         }
 
     fight_duration_ms = fight["endTime"] - fight["startTime"]
@@ -528,8 +464,3 @@ def _determine_trigger_type(cd_analysis, relative_times):
             if avg > 0 and cv / avg > 0.3:
                 return "可能血量触发（施法间隔与战斗进度不均匀）"
     return "非固定CD（需结合战斗录像判断是否为血量触发）"
-
-
-def filter_events_by_time(events, start_time, end_time):
-    """按时间范围过滤事件"""
-    return [e for e in events if start_time <= e.get("timestamp", 0) <= end_time]

@@ -6,7 +6,7 @@
     python analyze_tank.py --code cAkFBvnmDKrChNTd --fight 1 --tank 1
 
     # 分析多场战斗
-    python analyze_tank.py --runs "cAkFBvnmDKrChNTd:1:1,PH3WYhJfKyQxa7dv:5:1,qnZjHtzJ9BLDwACb:3:3"
+    python analyze_tank.py --runs "cAkFBvnmDKrChNTd:1:1,PH3WYhJfKyQxa7dv:5:1"
 
     # 从find_tank_runs的输出JSON分析
     python analyze_tank.py --from-json tank_runs.json --boss-damage --trash-damage
@@ -44,12 +44,10 @@ def main():
 
     client = WCLClient()
 
-    # 列出玩家
     if args.code and args.list_players:
         _list_players(client, args.code)
         return
 
-    # 确定要分析的run列表
     runs = []
     if args.from_json:
         with open(args.from_json, "r", encoding="utf-8") as f:
@@ -66,7 +64,6 @@ def main():
         parser.print_help()
         return
 
-    # 逐个分析
     for code, fight_id, tank_id, tank_name in runs:
         print(f"\n{'='*60}")
         print(f"分析: {tank_name} (报告 {code}, Fight {fight_id})")
@@ -90,13 +87,12 @@ def main():
         kill = "通关" if result["kill"] else "未通关"
         print(f"  {dungeon} +{ksl} | {result['duration_str']} | {kill}")
 
-        # 总承伤
         ts = result["total_stats"]
         print(f"\n  --- 总承伤 ---")
         print(f"  总承伤: {format_number(ts['total'])} | 实际掉血: {format_number(ts['raw'])}")
         print(f"  减伤量: {format_number(ts['mitigated'])} | 减伤率: {ts['mitigation_rate']:.1f}%")
 
-        # Boss阶段
+        # Boss阶段（技能维度+伤害类型）
         if args.boss_damage or args.boss_only:
             print(f"\n  --- Boss阶段承伤 ---")
             for boss_name, stats in result["boss_damage"].items():
@@ -105,23 +101,43 @@ def main():
                     if boss_num != args.boss_only:
                         continue
                 print(f"\n  {boss_name} ({stats['duration_str']})")
-                print(f"    总承伤: {format_number(stats['total'])} | DPS: {stats['dps_str']}")
-                print(f"    减伤率: {stats['mitigation_rate']:.1f}%")
-                if stats.get("by_ability_detail"):
-                    print(f"    技能分布:")
-                    for skill, detail in sorted(stats["by_ability_detail"].items(), key=lambda x: -x[1]["damage"]):
-                        print(f"      {skill}: {format_number(detail['damage'])} ({detail['pct']:.1f}%)")
+                print(f"  总承伤: {format_number(stats['total'])} | DPS: {stats['dps_str']}")
+                print(f"  减伤率: {stats['mitigation_rate']:.1f}%")
 
-        # 小怪阶段
+                # 技能详情
+                if stats.get("skills"):
+                    print(f"  技能详情:")
+                    for sk in stats["skills"]:
+                        pct = sk["total_damage"] / max(stats["total"], 1) * 100
+                        print(f"    [{sk['damage_type']}] {sk['source_name']} - 技能ID:{sk['ability_id']}")
+                        print(f"      命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
+                        print(f"      单次最大: {format_number(sk['max_unmitigated'])} | 平均: {format_number(sk['avg_unmitigated'])}")
+                        interval = sk["interval_stats"]
+                        if interval.get("avg_interval_s") is not None:
+                            print(f"      攻击间隔: {interval['avg_interval_s']:.2f}s "
+                                  f"(最短{interval['min_interval_s']:.2f}s / 最长{interval['max_interval_s']:.2f}s)")
+                            print(f"      模式: {interval['pattern']} - {interval['description']}")
+
+        # 小怪阶段（技能维度+攻击间隔）
         if args.trash_damage:
             print(f"\n  --- 小怪阶段承伤 ---")
             for phase_name, stats in result["trash_damage"].items():
                 print(f"\n  {phase_name} ({stats['duration_str']})")
-                print(f"    总承伤: {format_number(stats['total'])} | DPS: {stats['dps_str']}")
-                if stats.get("by_source_detail"):
-                    print(f"    怪物来源:")
-                    for source, detail in sorted(stats["by_source_detail"].items(), key=lambda x: -x[1]["damage"])[:10]:
-                        print(f"      {source}: {format_number(detail['damage'])} ({detail['pct']:.1f}%)")
+                print(f"  总承伤: {format_number(stats['total'])} | DPS: {stats['dps_str']}")
+
+                # 技能详情
+                if stats.get("skills"):
+                    print(f"  技能详情（按伤害降序）:")
+                    for sk in stats["skills"]:
+                        pct = sk["total_damage"] / max(stats["total"], 1) * 100
+                        print(f"    [{sk['damage_type']}] {sk['source_name']} - 技能ID:{sk['ability_id']}")
+                        print(f"      命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
+                        print(f"      单次最大(未减免): {format_number(sk['max_unmitigated'])} | 平均(未减免): {format_number(sk['avg_unmitigated'])}")
+                        interval = sk["interval_stats"]
+                        if interval.get("avg_interval_s") is not None:
+                            print(f"      攻击间隔: {interval['avg_interval_s']:.2f}s "
+                                  f"(最短{interval['min_interval_s']:.2f}s / 最长{interval['max_interval_s']:.2f}s)")
+                        print(f"      模式: {interval['pattern']} - {interval['description']}")
 
 
 def _list_players(client, code):
