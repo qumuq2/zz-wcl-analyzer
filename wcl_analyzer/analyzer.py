@@ -256,7 +256,7 @@ def analyze_boss_damage_taken(client, code, fight_id, tank_id, boss_names=None):
         ]
 
         # 按技能维度分析
-        skills = analyze_skills(boss_only_events, actor_name_map, ability_type_map)
+        skills = analyze_skills(boss_only_events, actor_name_map, ability_type_map, ability_map)
 
         duration_ms = phase["end"] - phase["start"]
         total_stats = calculate_damage_taken_stats(boss_only_events, actor_name_map)
@@ -305,7 +305,7 @@ def analyze_trash_damage_taken(client, code, fight_id, tank_id, boss_names=None)
         ]
 
         # 按技能维度分析
-        skills = analyze_skills(trash_only_events, actor_name_map, ability_type_map)
+        skills = analyze_skills(trash_only_events, actor_name_map, ability_type_map, ability_map)
 
         duration_ms = phase["end"] - phase["start"]
         after_boss = phase["after_boss"]
@@ -354,7 +354,7 @@ def analyze_full_tank_run(client, code, fight_id, tank_id, tank_name,
             and actor_name_map.get(e.get("sourceID", 0)) == boss_name
         ]
 
-        skills = analyze_skills(boss_events, actor_name_map, ability_type_map)
+        skills = analyze_skills(boss_events, actor_name_map, ability_type_map, ability_map)
         duration_ms = phase["end"] - phase["start"]
         stats = calculate_damage_taken_stats(boss_events, actor_name_map)
 
@@ -376,7 +376,7 @@ def analyze_full_tank_run(client, code, fight_id, tank_id, tank_name,
             and actor_name_map.get(e.get("sourceID", 0)) not in boss_names_set
         ]
 
-        skills = analyze_skills(trash_events, actor_name_map, ability_type_map)
+        skills = analyze_skills(trash_events, actor_name_map, ability_type_map, ability_map)
         duration_ms = phase["end"] - phase["start"]
         after_boss = phase["after_boss"]
         stats = calculate_damage_taken_stats(trash_events, actor_name_map)

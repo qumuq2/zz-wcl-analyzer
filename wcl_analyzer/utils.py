@@ -129,6 +129,12 @@ def detect_boss_phases(events, actor_name_map, boss_names=None):
     for e in events:
         source_id = e.get("sourceID", 0)
         source_name = actor_name_map.get(source_id, f"NPC-{source_id}")
+
+        # 技能名称：从ability_map获取，没有则显示ID
+        if ability_map and ability_id in ability_map:
+            ability_name = ability_map[ability_id].get("name", f"技能{ability_id}")
+        else:
+            ability_name = f"技能{ability_id}"
         source_events[source_name].append(e.get("timestamp", 0))
 
     boss_phases = []
@@ -190,6 +196,12 @@ def calculate_damage_taken_stats(events, actor_name_map=None):
 
         if actor_name_map:
             source_name = actor_name_map.get(source_id, f"NPC-{source_id}")
+
+        # 技能名称：从ability_map获取，没有则显示ID
+        if ability_map and ability_id in ability_map:
+            ability_name = ability_map[ability_id].get("name", f"技能{ability_id}")
+        else:
+            ability_name = f"技能{ability_id}"
             by_source[source_name] += event_total
         else:
             by_source[source_id] += event_total
@@ -215,7 +227,7 @@ def calculate_damage_taken_stats(events, actor_name_map=None):
 
 # ===== 技能维度统计 =====
 
-def analyze_skills(events, actor_name_map, ability_type_map):
+def analyze_skills(events, actor_name_map, ability_type_map, ability_map=None):
     """按技能维度分析承伤，包含伤害类型、攻击间隔等
 
     Args:
@@ -246,6 +258,12 @@ def analyze_skills(events, actor_name_map, ability_type_map):
         evts_sorted = sorted(evts, key=lambda e: e.get("timestamp", 0))
 
         source_name = actor_name_map.get(source_id, f"NPC-{source_id}")
+
+        # 技能名称：从ability_map获取，没有则显示ID
+        if ability_map and ability_id in ability_map:
+            ability_name = ability_map[ability_id].get("name", f"技能{ability_id}")
+        else:
+            ability_name = f"技能{ability_id}"
 
         # 伤害类型
         type_value = ability_type_map.get(ability_id, 0)
@@ -285,6 +303,7 @@ def analyze_skills(events, actor_name_map, ability_type_map):
 
         skill_info = {
             "source_name": source_name,
+            "ability_name": ability_name,
             "source_id": source_id,
             "ability_id": ability_id,
             "damage_type": damage_type_str,

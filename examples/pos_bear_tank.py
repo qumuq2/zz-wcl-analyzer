@@ -136,7 +136,7 @@ def _analyze_single(client, code, fight_id, tank_id, tank_name):
             print(f"\n  技能详情:")
             for sk in b1["skills"]:
                 pct = sk["total_damage"] / max(b1["total"], 1) * 100
-                print(f"  [{sk['damage_type']}] 技能ID:{sk['ability_id']}")
+                print(f"  [{sk['damage_type']}] {sk.get('ability_name', sk['ability_id'])} (ID:{sk['ability_id']})")
                 print(f"    命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
                 print(f"    单次最大(未减免): {format_number(sk['max_unmitigated'])} | 平均: {format_number(sk['avg_unmitigated'])}")
                 interval = sk["interval_stats"]
@@ -156,7 +156,7 @@ def _analyze_single(client, code, fight_id, tank_id, tank_name):
             print(f"\n  技能详情（按伤害降序）:")
             for sk in t2["skills"]:
                 pct = sk["total_damage"] / max(t2["total"], 1) * 100
-                print(f"  [{sk['damage_type']}] {sk['source_name']} - 技能ID:{sk['ability_id']}")
+                print(f"  [{sk['damage_type']}] {sk['source_name']} - {sk.get('ability_name', sk['ability_id'])} (ID:{sk['ability_id']})")
                 print(f"    命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
                 print(f"    单次最大(未减免): {format_number(sk['max_unmitigated'])} | 平均(未减免): {format_number(sk['avg_unmitigated'])}")
                 interval = sk["interval_stats"]
