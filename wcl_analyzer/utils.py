@@ -107,11 +107,9 @@ def filter_events_by_target(events, target_id):
     """客户端过滤：按targetID过滤事件（WCL API的targetID参数无效）"""
     return [e for e in events if e.get("targetID") == target_id]
 
-
 def filter_events_by_source(events, source_id):
     """客户端过滤：按sourceID过滤事件"""
     return [e for e in events if e.get("sourceID") == source_id]
-
 
 def filter_events_by_time(events, start_time, end_time):
     """客户端过滤：按时间范围过滤事件"""
@@ -129,12 +127,6 @@ def detect_boss_phases(events, actor_name_map, boss_names=None):
     for e in events:
         source_id = e.get("sourceID", 0)
         source_name = actor_name_map.get(source_id, f"NPC-{source_id}")
-
-        # 技能名称：从ability_map获取，没有则显示ID
-        if ability_map and ability_id in ability_map:
-            ability_name = ability_map[ability_id].get("name", f"技能{ability_id}")
-        else:
-            ability_name = f"技能{ability_id}"
         source_events[source_name].append(e.get("timestamp", 0))
 
     boss_phases = []
@@ -196,12 +188,6 @@ def calculate_damage_taken_stats(events, actor_name_map=None):
 
         if actor_name_map:
             source_name = actor_name_map.get(source_id, f"NPC-{source_id}")
-
-        # 技能名称：从ability_map获取，没有则显示ID
-        if ability_map and ability_id in ability_map:
-            ability_name = ability_map[ability_id].get("name", f"技能{ability_id}")
-        else:
-            ability_name = f"技能{ability_id}"
             by_source[source_name] += event_total
         else:
             by_source[source_id] += event_total
@@ -234,17 +220,19 @@ def analyze_skills(events, actor_name_map, ability_type_map, ability_map=None):
         events: DamageTaken事件列表（已过滤到特定目标+特定时间段）
         actor_name_map: {actor_id: actor_name} 映射
         ability_type_map: {ability_game_id: type_value} 映射（从masterData获取）
+        ability_map: {ability_game_id: ability_info} 映射（可选，用于获取技能名）
 
     Returns:
         按来源+技能分组的分析结果列表，每个技能包含：
         - 来源名称
         - 技能名称/ID
-        - 伤害类型（中文，如"物理"、"冰霜"、"火焰|自然"）
+        - 伤害类型（中文）
         - 总伤害、命中次数
-        - 单次最大伤害（unmitigatedAmount）
-        - 单次平均伤害
-        - 攻击间隔统计（均值、最短、最长）
-        - 攻击模式判断（慢重/快轻/技能型）
+        - max_unmitigated: 单次最大（减免前）
+        - max_amount: 单次最大（减免后/实际承伤）
+        - avg_amount: 单次平均（减免后/实际承伤）
+        - 攻击间隔统计
+        - 攻击模式判断
     """
     # 按(source_id, ability_id)分组
     grouped = defaultdict(list)
@@ -271,25 +259,30 @@ def analyze_skills(events, actor_name_map, ability_type_map, ability_map=None):
 
         # 伤害统计
         total_damage = 0
+        total_amount = 0       # 实际承伤累计
         total_unmitigated = 0
-        max_hit = 0
-        max_unmitigated = 0
+        max_hit = 0            # 单次最大(amount + mitigated)
+        max_unmitigated = 0    # 单次最大（减免前）
+        max_amount = 0         # 单次最大（减免后/实际承伤）
         timestamps = []
 
         for e in evts_sorted:
-            amount = e.get("amount", 0)
-            mit = e.get("mitigated", 0)
-            unmit = e.get("unmitigatedAmount", 0)
+            amount = e.get("amount", 0)          # 实际承伤（减免后）
+            mit = e.get("mitigated", 0)           # 减免量
+            unmit = e.get("unmitigatedAmount", 0) # 减免前
             event_total = amount + mit
 
             total_damage += event_total
+            total_amount += amount
             total_unmitigated += unmit
             max_hit = max(max_hit, event_total)
             max_unmitigated = max(max_unmitigated, unmit)
+            max_amount = max(max_amount, amount)
             timestamps.append(e.get("timestamp", 0))
 
         hit_count = len(evts_sorted)
         avg_hit = total_damage / max(hit_count, 1)
+        avg_amount = total_amount / max(hit_count, 1)       # 单次平均（减免后）
         avg_unmitigated = total_unmitigated / max(hit_count, 1)
 
         # 攻击间隔分析
@@ -309,8 +302,11 @@ def analyze_skills(events, actor_name_map, ability_type_map, ability_map=None):
             "damage_type": damage_type_str,
             "total_damage": total_damage,
             "hit_count": hit_count,
+            "max_unmitigated": max_unmitigated,  # 单次最大（减免前）
+            "max_amount": max_amount,            # 单次最大（减免后）
+            "avg_amount": avg_amount,            # 单次平均（减免后）
+            # 保留旧字段兼容
             "max_hit": max_hit,
-            "max_unmitigated": max_unmitigated,
             "avg_hit": avg_hit,
             "avg_unmitigated": avg_unmitigated,
             "interval_stats": interval_stats,
@@ -426,7 +422,6 @@ def format_duration(ms):
     mins = minutes % 60
     return f"{hours}h{mins}m"
 
-
 def format_dps(damage, duration_ms):
     """计算并格式化DPS"""
     if duration_ms <= 0:
@@ -438,7 +433,6 @@ def format_dps(damage, duration_ms):
         return f"{dps/1_000:.1f}K/s"
     else:
         return f"{dps:.0f}/s"
-
 
 def format_number(n):
     """格式化数字，添加千位分隔符"""

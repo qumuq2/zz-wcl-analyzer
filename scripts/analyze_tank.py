@@ -29,6 +29,30 @@ from wcl_analyzer.utils import (
 from wcl_analyzer.config import PIT_OF_SARON_BOSSES, PIT_OF_SARON_BOSS1_SKILLS, SEASON1_DUNGEONS
 
 
+def _format_wan(value):
+    """将伤害值格式化为万单位"""
+    return f"{value / 10000:.0f}万"
+
+
+def _print_skill_detail(sk, total_damage):
+    """输出单个技能的详细信息"""
+    pct = sk["total_damage"] / max(total_damage, 1) * 100
+    print(f"    [{sk['damage_type']}] {sk['source_name']} - {sk['ability_name']}")
+    print(f"      命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
+    # 三维度伤害
+    max_pre = sk.get("max_unmitigated", 0)
+    max_post = sk.get("max_amount", 0)
+    avg_post = sk.get("avg_amount", 0)
+    print(f"      单次最大(减免前): {_format_wan(max_pre)} | "
+          f"单次最大(减免后): {_format_wan(max_post)} | "
+          f"单次平均(减免后): {_format_wan(avg_post)}")
+    interval = sk["interval_stats"]
+    if interval.get("avg_interval_s") is not None:
+        print(f"      攻击间隔: {interval['avg_interval_s']:.2f}s "
+              f"(最短{interval['min_interval_s']:.2f}s / 最长{interval['max_interval_s']:.2f}s)")
+        print(f"      模式: {interval['pattern']} - {interval['description']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="分析坦克承伤")
     parser.add_argument("--code", type=str, help="WCL报告代码")
@@ -108,15 +132,7 @@ def main():
                 if stats.get("skills"):
                     print(f"  技能详情:")
                     for sk in stats["skills"]:
-                        pct = sk["total_damage"] / max(stats["total"], 1) * 100
-                        print(f"    [{sk['damage_type']}] {sk['source_name']} - 技能ID:{sk['ability_id']}")
-                        print(f"      命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
-                        print(f"      单次最大: {format_number(sk['max_unmitigated'])} | 平均: {format_number(sk['avg_unmitigated'])}")
-                        interval = sk["interval_stats"]
-                        if interval.get("avg_interval_s") is not None:
-                            print(f"      攻击间隔: {interval['avg_interval_s']:.2f}s "
-                                  f"(最短{interval['min_interval_s']:.2f}s / 最长{interval['max_interval_s']:.2f}s)")
-                            print(f"      模式: {interval['pattern']} - {interval['description']}")
+                        _print_skill_detail(sk, stats["total"])
 
         # 小怪阶段（技能维度+攻击间隔）
         if args.trash_damage:
@@ -129,15 +145,7 @@ def main():
                 if stats.get("skills"):
                     print(f"  技能详情（按伤害降序）:")
                     for sk in stats["skills"]:
-                        pct = sk["total_damage"] / max(stats["total"], 1) * 100
-                        print(f"    [{sk['damage_type']}] {sk['source_name']} - 技能ID:{sk['ability_id']}")
-                        print(f"      命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
-                        print(f"      单次最大(未减免): {format_number(sk['max_unmitigated'])} | 平均(未减免): {format_number(sk['avg_unmitigated'])}")
-                        interval = sk["interval_stats"]
-                        if interval.get("avg_interval_s") is not None:
-                            print(f"      攻击间隔: {interval['avg_interval_s']:.2f}s "
-                                  f"(最短{interval['min_interval_s']:.2f}s / 最长{interval['max_interval_s']:.2f}s)")
-                        print(f"      模式: {interval['pattern']} - {interval['description']}")
+                        _print_skill_detail(sk, stats["total"])
 
 
 def _list_players(client, code):
