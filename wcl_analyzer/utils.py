@@ -313,8 +313,11 @@ def analyze_skills(events, actor_name_map, ability_type_map, ability_map=None):
         }
         results.append(skill_info)
 
-    # 按总伤害降序排列，过滤掉total_damage=0的技能（全是偏转/未命中的Melee）
-    results = [r for r in results if r["total_damage"] > 0]
+    # 标注total_damage=0的技能（全是偏转/未命中）
+    for r in results:
+        if r["total_damage"] == 0:
+            r["note"] = "全偏转/未命中(0伤害)"
+    # 按总伤害降序排列
     results.sort(key=lambda x: -x["total_damage"])
     return results
 
