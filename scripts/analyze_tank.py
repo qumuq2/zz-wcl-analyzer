@@ -41,9 +41,11 @@ def _print_skill_detail(sk, total_damage):
     print(f"      命中{sk['hit_count']}次 | 总伤害: {format_number(sk['total_damage'])} ({pct:.1f}%)")
     # 三维度伤害
     max_pre = sk.get("max_unmitigated", 0)
+    avg_pre = sk.get("avg_unmitigated", 0)
     max_post = sk.get("max_amount", 0)
     avg_post = sk.get("avg_amount", 0)
     print(f"      单次最大(减免前): {_format_wan(max_pre)} | "
+          f"单次平均(减免前): {_format_wan(avg_pre)} | "
           f"单次最大(减免后): {_format_wan(max_post)} | "
           f"单次平均(减免后): {_format_wan(avg_post)}")
     interval = sk["interval_stats"]
