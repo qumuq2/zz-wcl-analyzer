@@ -57,21 +57,50 @@ class BossTimelineAnalyzer:
             if actor.get("subType") == "Boss":
                 boss_actors[actor["id"]] = actor["name"]
 
-        # 检测Boss阶段（基于对坦克的承伤）
+        # 检测Boss阶段
+        # 起点使用boss首次cast事件（boss进战斗时刻）
+        # 终点使用DamageDone to boss（boss末次受击=死亡），比cast更精确
+        # 这样避免boss死后残余cast事件导致窗口过长，也排除boss战前后的垃圾伤害
         boss_phases = {}
         for boss_id, boss_name in boss_actors.items():
-            boss_dmg = [e for e in tank_events if e.get("sourceID") == boss_id]
-            if not boss_dmg:
+            boss_dmg_on_tank = [e for e in tank_events if e.get("sourceID") == boss_id]
+            if not boss_dmg_on_tank:
                 continue
-            ts_list = [e.get("timestamp", 0) for e in boss_dmg]
-            # 也用施法事件扩展边界
-            boss_casts = [c for c in cast_events if c.get("sourceID") == boss_id]
-            for c in boss_casts:
-                ts_list.append(c.get("timestamp", 0))
+
+            # 起点：boss首次cast（进战斗时刻）
+            boss_casts_list = [c for c in cast_events if c.get("sourceID") == boss_id]
+            if boss_casts_list:
+                phase_start = min(c.get("timestamp", 0) for c in boss_casts_list)
+            else:
+                phase_start = min(e.get("timestamp", 0) for e in boss_dmg_on_tank)
+
+            # 终点：用DamageDone to boss确定boss死亡时间
+            try:
+                dmg_to_boss = self.client.get_all_events(
+                    code, [fight_id], "DamageDone", target_id=boss_id, max_pages=30
+                )
+                if dmg_to_boss:
+                    last_dmg = max(e.get("timestamp", 0) for e in dmg_to_boss)
+                    phase_end = last_dmg + 2000  # +2s缓冲
+                else:
+                    # fallback: 用cast事件
+                    if boss_casts_list:
+                        phase_end = max(c.get("timestamp", 0) for c in boss_casts_list)
+                    else:
+                        phase_end = max(e.get("timestamp", 0) for e in boss_dmg_on_tank)
+                import time as _time
+                _time.sleep(0.3)  # DamageDone查询后限流
+            except Exception:
+                # fallback: 用旧逻辑
+                ts_list = [e.get("timestamp", 0) for e in boss_dmg_on_tank]
+                for c in boss_casts_list:
+                    ts_list.append(c.get("timestamp", 0))
+                phase_end = max(ts_list)
+
             boss_phases[boss_name] = {
                 "boss_id": boss_id,
-                "start": min(ts_list),
-                "end": max(ts_list),
+                "start": phase_start,
+                "end": phase_end,
             }
 
         return {
